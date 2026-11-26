@@ -39,13 +39,14 @@
     #turn-info { font-size:1.05rem; font-weight:700; }
     #turn-info .p1 { color:var(--p1); }
     #turn-info .p2 { color:var(--p2); }
-    #board { display:grid; grid-template-columns:repeat(9,minmax(42px,1fr)); gap:4px; max-width:680px; margin:0 auto; padding:8px; background:#10162a; border:1px solid var(--line); border-radius:14px; }
-    .cell { aspect-ratio:1; border:1px solid #263053; border-radius:8px; background:#17203a; display:flex; align-items:center; justify-content:center; position:relative; cursor:default; user-select:none; }
+    #board { display:grid; grid-template-columns:repeat(16,minmax(24px,1fr)); gap:2px; max-width:760px; margin:0 auto; padding:8px; background:#10162a; border:1px solid var(--line); border-radius:14px; }
+    .cell { aspect-ratio:1; border:1px solid #263053; border-radius:4px; background:#17203a; display:flex; align-items:center; justify-content:center; position:relative; cursor:default; user-select:none; }
     .cell.reachable { background:#1d3b31; border-color:var(--good); cursor:pointer; }
     .cell.targetable { background:#4a2230; border-color:var(--p2); cursor:crosshair; }
     .cell.selected { border-color:var(--gold); box-shadow:inset 0 0 0 2px var(--gold); }
-    .unit { font-size:1.35rem; line-height:1; text-align:center; }
-    .unit .hp { display:block; font-size:.6rem; color:var(--gold); letter-spacing:-1px; margin-top:2px; }
+    .unit { font-size:1.05rem; line-height:1; text-align:center; }
+    .unit .hpbar { display:block; width:82%; height:5px; margin:3px auto 0; background:#2a1a2a; border:1px solid rgba(0,0,0,.5); border-radius:3px; overflow:hidden; }
+    .unit .hpfill { display:block; height:100%; border-radius:3px; }
     .unit.o0 { color:var(--p1); }
     .unit.o1 { color:var(--p2); }
     #side { margin-top:12px; display:grid; grid-template-columns:1fr 260px; gap:12px; }
@@ -64,7 +65,7 @@
 <div id="setup" class="screen show">
     <div class="card">
         <h1>SB-fights-</h1>
-        <p>1v1 local. Ambos jugadores usan <b>5 copias de diamond</b>: 10 corazones, daño 4, movimiento de 1-2 casillas en cualquier dirección y habilidad disponible cada 2 turnos. Por turno mueves <b>uno</b>, atacas o usas su habilidad. Ganas cuando el otro se queda sin personajes.</p>
+        <p>1v1 local en tablero de <b>16×16</b>. Ambos jugadores usan <b>5 copias de diamond</b>: 100 de vida, 40 de daño, movimiento de <b>reina de ajedrez hasta 3 casillas</b> y cada golpe empuja al rival <b>4 casillas</b>. La habilidad, disponible cada 2 turnos, te hace invencible 1-2 turnos sin poder moverte; tú eliges cuándo salir. Ganas cuando el otro se queda sin personajes.</p>
         <h2 id="pick-title">Jugador 1: 0/5 copias de diamond</h2>
         <div class="roster" id="roster"></div>
         <div class="picks">
@@ -94,10 +95,11 @@
         <div id="side">
             <div id="log"><div>La batalla empieza.</div></div>
             <div class="small">
-                <b>Movimiento:</b> 1-2 casillas en cualquier dirección, incluso en diagonal.<br>
+                <b>Movimiento:</b> como una reina, hasta 3 casillas en línea (horizontal, vertical o diagonal).<br>
                 No puedes atravesar ni ocupar casillas con personajes.<br>
-                <b>Ataque:</b> 4 corazones a un enemigo adyacente (también en diagonal).<br>
-                <b>Habilidad:</b> 4 corazones a cualquier enemigo; disponible cada 2 turnos y consume el turno.
+                <b>Ataque:</b> 40 de daño a un enemigo adyacente y lo empuja 4 casillas.<br>
+                <b>Habilidad:</b> cada 2 turnos; te vuelve invencible 1-2 turnos y no puedes moverte. Pulsa el botón para salir antes de cumplir los 2 turnos.<br>
+                La barra bajo cada personaje muestra su vida restante.
             </div>
         </div>
     </div>
@@ -117,14 +119,16 @@
 <script>
 'use strict';
 
-const DAMAGE = 4;
+const DAMAGE = 40;
+const KNOCKBACK = 4;
 const SKILL_COOLDOWN = 2;
+const MAX_SKILL_TURNS = 2;
 const PICK_COUNT = 5;
 const ROSTER = [
-    { id:'diamond', name:'diamond', emoji:'💎', hp:10, move:2, atk:DAMAGE, skillCd:SKILL_COOLDOWN }
+    { id:'diamond', name:'diamond', emoji:'💎', hp:100, move:3, atk:DAMAGE }
 ];
-const W = 9, H = 8;
-const COLS = [0, 2, 4, 6, 8];
+const W = 16, H = 16;
+const COLS = [1, 4, 7, 10, 13];
 
 const state = {
     phase: 0,
@@ -133,7 +137,6 @@ const state = {
     current: 0,
     selected: null,
     awaitingAttack: null,
-    awaitingSkill: false,
     log: [],
     winner: null
 };
@@ -159,8 +162,8 @@ function renderRoster() {
         btn.disabled = count >= PICK_COUNT;
         btn.innerHTML = '<div class="face">' + h.emoji + '</div>'
             + '<div class="name">' + h.name + (count ? ' ×' + count : '') + '</div>'
-            + '<div class="stats">❤ ' + h.hp + ' · ↦ 1-' + h.move + ' · ⚔ ' + h.atk + '</div>'
-            + '<div class="stats">✨ habilidad cada ' + SKILL_COOLDOWN + ' turnos</div>'
+            + '<div class="stats">❤ ' + h.hp + ' · ♛ ' + h.move + ' · ⚔ ' + h.atk + '</div>'
+            + '<div class="stats">✨ invencible 1-' + MAX_SKILL_TURNS + ' turnos / cada ' + SKILL_COOLDOWN + '</div>'
             + '<div class="stats">' + (btn.disabled ? 'Equipo completo' : 'Clic: añadir copia') + '</div>';
         box.appendChild(btn);
     }
@@ -209,7 +212,6 @@ function startBattle() {
     state.current = 0;
     state.selected = null;
     state.awaitingAttack = null;
-    state.awaitingSkill = false;
     state.winner = null;
     state.log = [];
     let nextId = 1;
@@ -218,8 +220,9 @@ function startBattle() {
             const h = heroById(id);
             state.units.push({
                 id: nextId++, owner: p, hero: id, name: h.name + ' ' + (i + 1), emoji: h.emoji,
-                x: COLS[i], y: p === 0 ? 7 : 0,
-                hp: h.hp, maxHp: h.hp, move: h.move, atk: h.atk, skillCd: 0
+                x: COLS[i], y: p === 0 ? H - 1 : 0,
+                hp: h.hp, maxHp: h.hp, move: h.move, atk: h.atk,
+                skillActive: false, skillTurn: 0, skillCd: 0
             });
         });
     }
@@ -239,20 +242,13 @@ function addLog(text) {
 }
 function reachableCells(unit) {
     const out = new Set();
-    const seen = new Set([key(unit.x, unit.y)]);
-    const queue = [{ x:unit.x, y:unit.y, d:0 }];
     const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
-    while (queue.length) {
-        const cur = queue.shift();
-        if (cur.d >= unit.move) continue;
-        for (const [dx, dy] of dirs) {
-            const nx = cur.x + dx, ny = cur.y + dy;
-            if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
-            const k = key(nx, ny);
-            if (seen.has(k) || unitAt(nx, ny)) continue;
-            seen.add(k);
-            out.add(k);
-            queue.push({ x:nx, y:ny, d:cur.d + 1 });
+    for (const [dx, dy] of dirs) {
+        for (let step = 1; step <= unit.move; step++) {
+            const nx = unit.x + dx * step, ny = unit.y + dy * step;
+            if (nx < 0 || nx >= W || ny < 0 || ny >= H) break;
+            if (unitAt(nx, ny)) break;
+            out.add(key(nx, ny));
         }
     }
     return out;
@@ -260,21 +256,29 @@ function reachableCells(unit) {
 function adjacentEnemies(unit) {
     return state.units.filter(u => u.owner !== unit.owner && isAdjacent(u, unit));
 }
-function skillTargets(unit) {
-    return state.units.filter(u => u.owner !== unit.owner);
+function knockback(attacker, target) {
+    const dx = Math.sign(target.x - attacker.x);
+    const dy = Math.sign(target.y - attacker.y);
+    let moved = 0;
+    for (let i = 0; i < KNOCKBACK; i++) {
+        const nx = target.x + dx, ny = target.y + dy;
+        if (nx < 0 || nx >= W || ny < 0 || ny >= H || unitAt(nx, ny)) break;
+        target.x = nx;
+        target.y = ny;
+        moved++;
+    }
+    if (moved) addLog(nameOf(target) + ' es empujado ' + moved + (moved === 1 ? ' casilla.' : ' casillas.'));
 }
 function renderBoard() {
     const board = $('board');
     board.innerHTML = '';
     const sel = getSelected();
-    const canMove = sel && state.awaitingAttack === null && !state.awaitingSkill;
+    const canMove = sel && !sel.skillActive && state.awaitingAttack === null;
     const reach = canMove ? reachableCells(sel) : new Set();
     const targets = new Set();
     if (state.awaitingAttack) {
         const attacker = unitById(state.awaitingAttack);
         if (attacker) adjacentEnemies(attacker).forEach(u => targets.add(u.id));
-    } else if (state.awaitingSkill && sel) {
-        skillTargets(sel).forEach(u => targets.add(u.id));
     }
 
     for (let y = 0; y < H; y++) {
@@ -287,10 +291,13 @@ function renderBoard() {
             if (u) {
                 if (u.id === state.selected) cell.classList.add('selected');
                 if (targets.has(u.id)) cell.classList.add('targetable');
-                const hearts = '♥'.repeat(Math.max(0, u.hp)) + '·'.repeat(Math.max(0, u.maxHp - u.hp));
+                const pct = Math.max(0, Math.min(100, (u.hp / u.maxHp) * 100));
+                const color = pct > 50 ? 'var(--good)' : pct > 25 ? 'var(--gold)' : '#ff6b6b';
                 const inner = document.createElement('div');
                 inner.className = 'unit o' + u.owner;
-                inner.innerHTML = u.emoji + '<span class="hp">' + hearts + '</span>';
+                inner.title = nameOf(u) + ' — ' + u.hp + '/' + u.maxHp + ' PV' + (u.skillActive ? ' — invencible' : '');
+                inner.innerHTML = u.emoji
+                    + '<span class="hpbar"><span class="hpfill" style="width:' + pct + '%;background:' + color + '"></span></span>';
                 cell.appendChild(inner);
             } else if (reach.has(key(x, y))) {
                 cell.classList.add('reachable');
@@ -301,8 +308,8 @@ function renderBoard() {
     const name = 'Jugador ' + (state.current + 1);
     const cls = state.current === 0 ? 'p1' : 'p2';
     let phaseText = ' — elige un personaje';
-    if (state.awaitingSkill) phaseText = ' — elige un enemigo para la habilidad';
-    else if (state.awaitingAttack) phaseText = ' — ataca a un enemigo adyacente';
+    if (state.awaitingAttack) phaseText = ' — ataca a un enemigo adyacente';
+    else if (sel && sel.skillActive) phaseText = ' — invencible, no puedes moverte (turno ' + (sel.skillTurn + 1) + '/' + MAX_SKILL_TURNS + ')';
     else if (sel) phaseText = ' — mueve a ' + sel.name + ', ataca o usa su habilidad';
     $('turn-info').innerHTML = 'Turno: <span class="' + cls + '">' + name + '</span>' + phaseText;
     renderSkillButton();
@@ -310,24 +317,29 @@ function renderBoard() {
 function renderSkillButton() {
     const sel = getSelected();
     const btn = $('skill-btn');
-    const ready = sel && sel.skillCd === 0 && state.awaitingAttack === null && !state.winner;
-    btn.disabled = !state.awaitingSkill && !ready;
-    btn.classList.toggle('active', state.awaitingSkill);
-    btn.textContent = state.awaitingSkill ? 'Cancelar habilidad'
-        : sel ? (sel.skillCd
-            ? 'Habilidad (' + sel.skillCd + (sel.skillCd === 1 ? ' turno)' : ' turnos)')
-            : 'Habilidad (lista)')
-        : 'Habilidad';
+    let label = 'Habilidad';
+    let disabled = true;
+    const own = sel && sel.owner === state.current && !state.winner;
+    if (own && sel.skillActive) {
+        if (sel.skillTurn >= 1) {
+            label = 'Salir de habilidad';
+            disabled = state.awaitingAttack !== null;
+        } else {
+            label = 'Invencible (turno 1/' + MAX_SKILL_TURNS + ')';
+        }
+    } else if (own && sel.skillCd > 0) {
+        label = 'Habilidad (' + sel.skillCd + (sel.skillCd === 1 ? ' turno)' : ' turnos)');
+    } else if (own && state.awaitingAttack === null) {
+        label = 'Activar habilidad';
+        disabled = false;
+    }
+    btn.disabled = disabled;
+    btn.classList.toggle('active', !!(own && sel.skillActive));
+    btn.textContent = label;
 }
 function onCellClick(x, y) {
     if (state.winner) return;
     const clicked = unitAt(x, y);
-
-    if (state.awaitingSkill) {
-        const caster = getSelected();
-        if (clicked && caster && clicked.owner !== state.current) doSkill(caster, clicked);
-        return;
-    }
 
     if (state.awaitingAttack) {
         const attacker = unitById(state.awaitingAttack);
@@ -351,7 +363,7 @@ function onCellClick(x, y) {
         return;
     }
 
-    if (!clicked && reachableCells(sel).has(key(x, y))) {
+    if (!clicked && !sel.skillActive && reachableCells(sel).has(key(x, y))) {
         sel.x = x;
         sel.y = y;
         addLog(nameOf(sel) + ' se mueve a (' + (x + 1) + ',' + (y + 1) + ').');
@@ -366,21 +378,25 @@ function onCellClick(x, y) {
     }
 }
 function nameOf(u) { return 'J' + (u.owner + 1) + '·' + u.name; }
-function doAttack(attacker, target) { applyHit(attacker, target, 'ataca'); }
-function doSkill(caster, target) {
-    caster.skillCd = SKILL_COOLDOWN;
-    applyHit(caster, target, 'usa su habilidad');
-}
-function applyHit(attacker, target, verb) {
+function doAttack(attacker, target) {
+    if (target.skillActive) {
+        addLog(nameOf(attacker) + ' golpea a ' + nameOf(target) + ', pero es invencible.');
+        state.selected = null;
+        state.awaitingAttack = null;
+        if (checkWinner()) return;
+        finishTurn();
+        return;
+    }
     target.hp -= DAMAGE;
-    addLog(nameOf(attacker) + ' ' + verb + ' a ' + nameOf(target) + ' (-' + DAMAGE + ').');
+    addLog(nameOf(attacker) + ' ataca a ' + nameOf(target) + ' (-' + DAMAGE + ').');
     if (target.hp <= 0) {
         state.units = state.units.filter(u => u.id !== target.id);
         addLog(nameOf(target) + ' queda fuera.');
+    } else {
+        knockback(attacker, target);
     }
     state.selected = null;
     state.awaitingAttack = null;
-    state.awaitingSkill = false;
     if (checkWinner()) return;
     finishTurn();
 }
@@ -394,30 +410,51 @@ function checkWinner() {
     $('winner-overlay').classList.add('show');
     return true;
 }
+function endSkill(u) {
+    u.skillActive = false;
+    u.skillTurn = 0;
+    u.skillCd = SKILL_COOLDOWN;
+}
 function finishTurn() {
-    state.current = other(state.current);
+    const leaving = state.current;
+    state.units.forEach(u => {
+        if (u.owner === leaving && u.skillActive) {
+            u.skillTurn++;
+            if (u.skillTurn >= MAX_SKILL_TURNS) {
+                endSkill(u);
+                addLog(nameOf(u) + ' termina su habilidad.');
+            }
+        }
+    });
+    state.current = other(leaving);
     state.units.forEach(u => {
         if (u.owner === state.current && u.skillCd > 0) u.skillCd--;
     });
+    const readyToExit = state.units.find(u => u.owner === state.current && u.skillActive && u.skillTurn >= 1);
+    if (readyToExit) state.selected = readyToExit.id;
     renderBoard();
 }
 function endTurn() {
     if (state.winner) return;
     state.selected = null;
     state.awaitingAttack = null;
-    state.awaitingSkill = false;
     finishTurn();
 }
 function toggleSkill() {
     if (state.winner || state.awaitingAttack) return;
-    if (state.awaitingSkill) {
-        state.awaitingSkill = false;
+    const sel = getSelected();
+    if (!sel || sel.owner !== state.current) return;
+    if (sel.skillActive) {
+        if (sel.skillTurn < 1) return;
+        endSkill(sel);
+        addLog(nameOf(sel) + ' sale de la habilidad.');
         renderBoard();
         return;
     }
-    const sel = getSelected();
-    if (!sel || sel.skillCd > 0) return;
-    state.awaitingSkill = true;
+    if (sel.skillCd > 0) return;
+    sel.skillActive = true;
+    sel.skillTurn = 0;
+    addLog(nameOf(sel) + ' activa la habilidad: invencible, no puede moverse.');
     renderBoard();
 }
 function backToDraft() {
