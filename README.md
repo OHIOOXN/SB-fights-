@@ -1,4 +1,4 @@
-# SB figts!
+# SB-fights-
 
 Juego 1v1 local (hot-seat) en un solo `index.html`, sin dependencias.
 
@@ -38,10 +38,10 @@ Abre `index.html` en el navegador. No necesita servidor ni instalación.
 
 ## Publicar
 
-El nombre del repositorio en GitHub es `sb-figts` (GitHub no permite espacios ni `!` en el slug). El título del juego es `SB figts!`.
+El nombre del repositorio en GitHub es `SB-fights-`. El título del juego es `SB-fights-`.
 
 ```bash
-git remote add origin git@github.com:OHIOOXN/sb-figts.git
+git remote add origin git@github.com:OHIOOXN/SB-fights-.git
 git push -u origin main
 ```
 
