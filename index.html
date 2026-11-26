@@ -16,6 +16,7 @@
     .btn:hover:not(:disabled) { border-color:var(--gold); }
     .btn:disabled { opacity:.45; cursor:not-allowed; }
     .btn.primary { background:#345c8a; border-color:#5c8ac4; }
+    .btn.active { background:#4a3d1f; border-color:var(--gold); }
     .btn.danger { background:#5a2735; border-color:#8d3a50; }
     .screen { display:none; max-width:980px; margin:0 auto; }
     .screen.show { display:block; }
@@ -63,8 +64,8 @@
 <div id="setup" class="screen show">
     <div class="card">
         <h1>SB-fights-</h1>
-        <p>1v1 local. Cada jugador elige <b>5 personajes</b> de la lista. Por turno mueves <b>uno</b> hasta tus casillas (Manhattan) o atacas a un enemigo adyacente. Ganas cuando el otro se queda sin personajes.</p>
-        <h2 id="pick-title">Jugador 1: elige 5</h2>
+        <p>1v1 local. Ambos jugadores usan <b>5 copias de diamond</b>: 10 corazones, daño 4, movimiento de 1-2 casillas en cualquier dirección y habilidad disponible cada 2 turnos. Por turno mueves <b>uno</b>, atacas o usas su habilidad. Ganas cuando el otro se queda sin personajes.</p>
+        <h2 id="pick-title">Jugador 1: 0/5 copias de diamond</h2>
         <div class="roster" id="roster"></div>
         <div class="picks">
             <div class="side p1"><b style="color:var(--p1)">Jugador 1</b><div id="p1-picks"></div></div>
@@ -72,6 +73,7 @@
         </div>
         <div class="row">
             <button class="btn primary" id="start-btn" disabled>Empezar batalla</button>
+            <button class="btn" id="remove-pick" disabled>Quitar una copia</button>
             <button class="btn" id="clear-picks">Limpiar selección</button>
         </div>
     </div>
@@ -82,6 +84,7 @@
         <div id="topbar">
             <div id="turn-info">—</div>
             <div class="row">
+                <button class="btn" id="skill-btn" disabled>Habilidad</button>
                 <button class="btn" id="end-turn">Terminar turno</button>
                 <button class="btn" id="rematch">Revancha</button>
                 <button class="btn danger" id="new-draft">Cambiar personajes</button>
@@ -91,10 +94,10 @@
         <div id="side">
             <div id="log"><div>La batalla empieza.</div></div>
             <div class="small">
-                <b>Movimiento:</b> casillas en horizontal/vertical.<br>
-                No puedes atravesar personajes.<br>
-                Al moverte junto a un enemigo, puedes clickarlo para atacar.<br>
-                También puedes atacar sin moverte si ya eras adyacente.
+                <b>Movimiento:</b> 1-2 casillas en cualquier dirección, incluso en diagonal.<br>
+                No puedes atravesar ni ocupar casillas con personajes.<br>
+                <b>Ataque:</b> 4 corazones a un enemigo adyacente (también en diagonal).<br>
+                <b>Habilidad:</b> 4 corazones a cualquier enemigo; disponible cada 2 turnos y consume el turno.
             </div>
         </div>
     </div>
@@ -114,17 +117,11 @@
 <script>
 'use strict';
 
+const DAMAGE = 4;
+const SKILL_COOLDOWN = 2;
+const PICK_COUNT = 5;
 const ROSTER = [
-    { id:'ant',      name:'Hormiga',   emoji:'🐜', hp:3, move:3, atk:1 },
-    { id:'beetle',   name:'Escarabajo',emoji:'🪲', hp:4, move:2, atk:1 },
-    { id:'mantis',   name:'Mantis',    emoji:'🦗', hp:2, move:4, atk:2 },
-    { id:'spider',   name:'Araña',     emoji:'🕷️', hp:2, move:3, atk:2 },
-    { id:'bee',      name:'Abeja',     emoji:'🐝', hp:2, move:4, atk:1 },
-    { id:'termite',  name:'Termita',   emoji:'🐛', hp:3, move:2, atk:2 },
-    { id:'crab',     name:'Cangrejo',  emoji:'🦀', hp:4, move:2, atk:2 },
-    { id:'butterfly',name:'Mariposa',  emoji:'🦋', hp:1, move:5, atk:1 },
-    { id:'scorpion', name:'Escorpión', emoji:'🦂', hp:3, move:3, atk:3 },
-    { id:'snail',    name:'Caracol',   emoji:'🐌', hp:5, move:1, atk:1 }
+    { id:'diamond', name:'diamond', emoji:'💎', hp:10, move:2, atk:DAMAGE, skillCd:SKILL_COOLDOWN }
 ];
 const W = 9, H = 8;
 const COLS = [0, 2, 4, 6, 8];
@@ -136,6 +133,7 @@ const state = {
     current: 0,
     selected: null,
     awaitingAttack: null,
+    awaitingSkill: false,
     log: [],
     winner: null
 };
@@ -144,39 +142,45 @@ const $ = id => document.getElementById(id);
 const heroById = id => ROSTER.find(h => h.id === id);
 const other = p => p === 0 ? 1 : 0;
 const key = (x, y) => x + ',' + y;
-const manhattan = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+const isAdjacent = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) === 1;
 
 /* ---------------- Draft ---------------- */
 function renderRoster() {
     const picker = state.phase;
-    const mine = state.picks[picker];
-    const theirs = state.picks[other(picker)];
-    $('pick-title').textContent = picker === 0 ? 'Jugador 1: elige 5' : 'Jugador 2: elige 5 de los restantes';
+    const count = state.picks[picker].length;
+    $('pick-title').textContent = (picker === 0 ? 'Jugador 1' : 'Jugador 2')
+        + ': ' + count + '/' + PICK_COUNT + ' copias de diamond';
     const box = $('roster');
     box.innerHTML = '';
     for (const h of ROSTER) {
         const btn = document.createElement('button');
         btn.dataset.id = h.id;
-        btn.className = 'hero' + (mine.includes(h.id) ? ' picked' : '');
-        const blocked = theirs.includes(h.id) || (mine.length >= 5 && !mine.includes(h.id));
-        btn.disabled = blocked;
+        btn.className = 'hero' + (count ? ' picked' : '');
+        btn.disabled = count >= PICK_COUNT;
         btn.innerHTML = '<div class="face">' + h.emoji + '</div>'
-            + '<div class="name">' + h.name + (mine.includes(h.id) ? ' ✓' : '') + '</div>'
-            + '<div class="stats">❤ ' + h.hp + ' · ↦ ' + h.move + ' · ⚔ ' + h.atk + '</div>';
+            + '<div class="name">' + h.name + (count ? ' ×' + count : '') + '</div>'
+            + '<div class="stats">❤ ' + h.hp + ' · ↦ 1-' + h.move + ' · ⚔ ' + h.atk + '</div>'
+            + '<div class="stats">✨ habilidad cada ' + SKILL_COOLDOWN + ' turnos</div>'
+            + '<div class="stats">' + (btn.disabled ? 'Equipo completo' : 'Clic: añadir copia') + '</div>';
         box.appendChild(btn);
     }
     renderPicks();
-    $('start-btn').disabled = !(state.picks[0].length === 5 && state.picks[1].length === 5);
+    $('start-btn').disabled = !(state.picks[0].length === PICK_COUNT && state.picks[1].length === PICK_COUNT);
+    $('remove-pick').disabled = count === 0;
 }
 function togglePick(id) {
     if (state.phase > 1) return;
     const mine = state.picks[state.phase];
-    const theirs = state.picks[other(state.phase)];
-    if (theirs.includes(id)) return;
-    const i = mine.indexOf(id);
-    if (i >= 0) mine.splice(i, 1);
-    else if (mine.length < 5) mine.push(id);
-    if (state.phase === 0 && state.picks[0].length === 5) state.phase = 1;
+    if (mine.length >= PICK_COUNT) return;
+    mine.push(id);
+    if (state.phase === 0 && mine.length === PICK_COUNT) state.phase = 1;
+    renderRoster();
+}
+function removePick() {
+    if (state.phase > 1) return;
+    const mine = state.picks[state.phase];
+    if (!mine.length) return;
+    mine.pop();
     renderRoster();
 }
 function renderPicks() {
@@ -205,6 +209,7 @@ function startBattle() {
     state.current = 0;
     state.selected = null;
     state.awaitingAttack = null;
+    state.awaitingSkill = false;
     state.winner = null;
     state.log = [];
     let nextId = 1;
@@ -212,9 +217,9 @@ function startBattle() {
         state.picks[p].forEach((id, i) => {
             const h = heroById(id);
             state.units.push({
-                id: nextId++, owner: p, hero: id, name: h.name, emoji: h.emoji,
+                id: nextId++, owner: p, hero: id, name: h.name + ' ' + (i + 1), emoji: h.emoji,
                 x: COLS[i], y: p === 0 ? 7 : 0,
-                hp: h.hp, maxHp: h.hp, move: h.move, atk: h.atk
+                hp: h.hp, maxHp: h.hp, move: h.move, atk: h.atk, skillCd: 0
             });
         });
     }
@@ -236,7 +241,7 @@ function reachableCells(unit) {
     const out = new Set();
     const seen = new Set([key(unit.x, unit.y)]);
     const queue = [{ x:unit.x, y:unit.y, d:0 }];
-    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
     while (queue.length) {
         const cur = queue.shift();
         if (cur.d >= unit.move) continue;
@@ -253,16 +258,24 @@ function reachableCells(unit) {
     return out;
 }
 function adjacentEnemies(unit) {
-    return state.units.filter(u => u.owner !== unit.owner && manhattan(u, unit) === 1);
+    return state.units.filter(u => u.owner !== unit.owner && isAdjacent(u, unit));
+}
+function skillTargets(unit) {
+    return state.units.filter(u => u.owner !== unit.owner);
 }
 function renderBoard() {
     const board = $('board');
     board.innerHTML = '';
     const sel = getSelected();
-    const canMove = sel && state.awaitingAttack === null;
+    const canMove = sel && state.awaitingAttack === null && !state.awaitingSkill;
     const reach = canMove ? reachableCells(sel) : new Set();
-    const attacker = state.awaitingAttack ? unitById(state.awaitingAttack) : null;
-    const targets = new Set(attacker ? adjacentEnemies(attacker).map(u => u.id) : []);
+    const targets = new Set();
+    if (state.awaitingAttack) {
+        const attacker = unitById(state.awaitingAttack);
+        if (attacker) adjacentEnemies(attacker).forEach(u => targets.add(u.id));
+    } else if (state.awaitingSkill && sel) {
+        skillTargets(sel).forEach(u => targets.add(u.id));
+    }
 
     for (let y = 0; y < H; y++) {
         for (let x = 0; x < W; x++) {
@@ -288,17 +301,37 @@ function renderBoard() {
     const name = 'Jugador ' + (state.current + 1);
     const cls = state.current === 0 ? 'p1' : 'p2';
     let phaseText = ' — elige un personaje';
-    if (state.awaitingAttack) phaseText = ' — ataca a un enemigo adyacente';
-    else if (sel) phaseText = ' — mueve a ' + sel.name + ' o ataca';
+    if (state.awaitingSkill) phaseText = ' — elige un enemigo para la habilidad';
+    else if (state.awaitingAttack) phaseText = ' — ataca a un enemigo adyacente';
+    else if (sel) phaseText = ' — mueve a ' + sel.name + ', ataca o usa su habilidad';
     $('turn-info').innerHTML = 'Turno: <span class="' + cls + '">' + name + '</span>' + phaseText;
+    renderSkillButton();
+}
+function renderSkillButton() {
+    const sel = getSelected();
+    const btn = $('skill-btn');
+    const ready = sel && sel.skillCd === 0 && state.awaitingAttack === null && !state.winner;
+    btn.disabled = !state.awaitingSkill && !ready;
+    btn.classList.toggle('active', state.awaitingSkill);
+    btn.textContent = state.awaitingSkill ? 'Cancelar habilidad'
+        : sel ? (sel.skillCd
+            ? 'Habilidad (' + sel.skillCd + (sel.skillCd === 1 ? ' turno)' : ' turnos)')
+            : 'Habilidad (lista)')
+        : 'Habilidad';
 }
 function onCellClick(x, y) {
     if (state.winner) return;
     const clicked = unitAt(x, y);
 
+    if (state.awaitingSkill) {
+        const caster = getSelected();
+        if (clicked && caster && clicked.owner !== state.current) doSkill(caster, clicked);
+        return;
+    }
+
     if (state.awaitingAttack) {
         const attacker = unitById(state.awaitingAttack);
-        if (clicked && clicked.owner !== state.current && manhattan(clicked, attacker) === 1) {
+        if (clicked && clicked.owner !== state.current && attacker && isAdjacent(clicked, attacker)) {
             doAttack(attacker, clicked);
         }
         return;
@@ -314,7 +347,7 @@ function onCellClick(x, y) {
     if (!sel) return;
 
     if (clicked && clicked.owner !== state.current) {
-        if (manhattan(sel, clicked) === 1) doAttack(sel, clicked);
+        if (isAdjacent(sel, clicked)) doAttack(sel, clicked);
         return;
     }
 
@@ -333,15 +366,21 @@ function onCellClick(x, y) {
     }
 }
 function nameOf(u) { return 'J' + (u.owner + 1) + '·' + u.name; }
-function doAttack(attacker, target) {
-    target.hp -= attacker.atk;
-    addLog(nameOf(attacker) + ' ataca a ' + nameOf(target) + ' (-' + attacker.atk + ').');
+function doAttack(attacker, target) { applyHit(attacker, target, 'ataca'); }
+function doSkill(caster, target) {
+    caster.skillCd = SKILL_COOLDOWN;
+    applyHit(caster, target, 'usa su habilidad');
+}
+function applyHit(attacker, target, verb) {
+    target.hp -= DAMAGE;
+    addLog(nameOf(attacker) + ' ' + verb + ' a ' + nameOf(target) + ' (-' + DAMAGE + ').');
     if (target.hp <= 0) {
         state.units = state.units.filter(u => u.id !== target.id);
         addLog(nameOf(target) + ' queda fuera.');
     }
     state.selected = null;
     state.awaitingAttack = null;
+    state.awaitingSkill = false;
     if (checkWinner()) return;
     finishTurn();
 }
@@ -357,13 +396,29 @@ function checkWinner() {
 }
 function finishTurn() {
     state.current = other(state.current);
+    state.units.forEach(u => {
+        if (u.owner === state.current && u.skillCd > 0) u.skillCd--;
+    });
     renderBoard();
 }
 function endTurn() {
     if (state.winner) return;
     state.selected = null;
     state.awaitingAttack = null;
+    state.awaitingSkill = false;
     finishTurn();
+}
+function toggleSkill() {
+    if (state.winner || state.awaitingAttack) return;
+    if (state.awaitingSkill) {
+        state.awaitingSkill = false;
+        renderBoard();
+        return;
+    }
+    const sel = getSelected();
+    if (!sel || sel.skillCd > 0) return;
+    state.awaitingSkill = true;
+    renderBoard();
 }
 function backToDraft() {
     $('battle').classList.remove('show');
@@ -380,12 +435,14 @@ $('roster').addEventListener('click', e => {
     if (btn && !btn.disabled) togglePick(btn.dataset.id);
 });
 $('clear-picks').addEventListener('click', clearPicks);
+$('remove-pick').addEventListener('click', removePick);
 $('start-btn').addEventListener('click', startBattle);
 $('board').addEventListener('click', e => {
     const cell = e.target.closest('.cell');
     if (!cell) return;
     onCellClick(Number(cell.dataset.x), Number(cell.dataset.y));
 });
+$('skill-btn').addEventListener('click', toggleSkill);
 $('end-turn').addEventListener('click', endTurn);
 $('rematch').addEventListener('click', startBattle);
 $('winner-rematch').addEventListener('click', startBattle);
