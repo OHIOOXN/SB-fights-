@@ -1,4 +1,5 @@
 # SB-fights-
+fight with sb characters
 
 Juego 1v1 local (hot-seat) en un solo `index.html`, sin dependencias.
 
